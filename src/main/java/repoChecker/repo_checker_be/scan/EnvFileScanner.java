@@ -20,10 +20,12 @@ import repoChecker.repo_checker_be.util.SnippetMasker;
 @Component
 public class EnvFileScanner {
 
-	private static final Pattern SUSPICIOUS_VALUE = Pattern.compile(
-			"(?i)^(api[_-]?key|secret|password|token|private[_-]?key)\\s*=\\s*(.+)$");
-	private static final Pattern SUSPICIOUS_VALUE_CONTENT = Pattern.compile(
-			"(?i)(ghp_|sk_live_|sk_test_|AKIA|Bearer\\s+)");
+	/** Matches OPENAI_API_KEY, GITHUB_TOKEN, AWS_SECRET_ACCESS_KEY, etc. */
+	private static final Pattern SENSITIVE_ENV_ASSIGNMENT = Pattern.compile(
+			"(?i)^[A-Za-z0-9_.-]*(?:api[_-]?key|secret|password|token|private[_-]?key|credential|auth)[A-Za-z0-9_.-]*\\s*=\\s*(.+)$");
+
+	private static final Pattern SECRET_TOKEN_IN_VALUE = Pattern.compile(
+			"(?i)(ghp_[a-zA-Z0-9]{20,}|sk_live_[a-zA-Z0-9]{16,}|sk_test_[a-zA-Z0-9]{16,}|AKIA[0-9A-Z]{16}|Bearer\\s+[a-zA-Z0-9\\-._~+/]+=*)");
 
 	private final long maxFileSizeBytes;
 
@@ -71,23 +73,31 @@ public class EnvFileScanner {
 						? FindingSeverity.MEDIUM
 						: FindingSeverity.CRITICAL;
 
-				var matcher = SUSPICIOUS_VALUE.matcher(line);
-				if (matcher.matches()) {
-					String value = matcher.group(2).trim();
-					if (!value.isEmpty() && !EnvFileRules.isPlaceholder(value)) {
+				boolean placeholder = template
+						? EnvFileRules.isTemplatePlaceholder(extractValue(line))
+						: EnvFileRules.isPlaceholder(extractValue(line));
+
+				var keyMatcher = SENSITIVE_ENV_ASSIGNMENT.matcher(line);
+				if (keyMatcher.matches()) {
+					String value = keyMatcher.group(1).trim();
+					if (!value.isEmpty() && !(template
+							? EnvFileRules.isTemplatePlaceholder(value)
+							: EnvFileRules.isPlaceholder(value))) {
 						findings.add(new Finding(
 								lineSeverity,
 								FindingCategory.ENV_FILE,
 								relativePath,
 								i + 1,
 								template
-										? "Non-placeholder value in environment template file"
+										? "Sensitive key with non-placeholder value in environment template"
 										: "Sensitive value in environment file",
 								SnippetMasker.mask(value)));
 					}
+					continue;
 				}
-				else if (SUSPICIOUS_VALUE_CONTENT.matcher(line).find()
-						&& !EnvFileRules.isPlaceholder(line)) {
+
+				var secretMatcher = SECRET_TOKEN_IN_VALUE.matcher(line);
+				if (secretMatcher.find() && !placeholder) {
 					findings.add(new Finding(
 							lineSeverity,
 							FindingCategory.ENV_FILE,
@@ -96,7 +106,7 @@ public class EnvFileScanner {
 							template
 									? "Possible secret pattern in environment template file"
 									: "Possible secret pattern in environment file",
-							SnippetMasker.mask(line)));
+							SnippetMasker.mask(secretMatcher.group(1))));
 				}
 			}
 		}
@@ -109,6 +119,14 @@ public class EnvFileScanner {
 					"Could not read environment file: " + ex.getMessage(),
 					null));
 		}
+	}
+
+	private String extractValue(String line) {
+		int eq = line.indexOf('=');
+		if (eq < 0 || eq == line.length() - 1) {
+			return "";
+		}
+		return line.substring(eq + 1).trim();
 	}
 
 	private boolean withinSizeLimit(Path path) {

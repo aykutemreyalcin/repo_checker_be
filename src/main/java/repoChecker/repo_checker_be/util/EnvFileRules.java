@@ -33,6 +33,7 @@ public final class EnvFileRules {
 		return ENV_TEMPLATE_NAME.matcher(fileName).matches();
 	}
 
+	/** Placeholder check for real .env files (stricter noise reduction). */
 	public static boolean isPlaceholder(String value) {
 		if (value == null || value.isBlank()) {
 			return true;
@@ -41,24 +42,45 @@ public final class EnvFileRules {
 		if (normalized.length() < 3) {
 			return true;
 		}
-		return normalized.contains("changeme")
+		return isObviousPlaceholder(normalized)
+				|| normalized.contains("changeme")
 				|| normalized.contains("your_")
-				|| normalized.contains("example")
 				|| normalized.contains("sample")
 				|| normalized.contains("placeholder")
 				|| normalized.contains("replace")
 				|| normalized.contains("insert")
 				|| normalized.contains("dummy")
 				|| normalized.contains("fake")
-				|| normalized.contains("redact")
+				|| normalized.contains("redact");
+	}
+
+	/**
+	 * Placeholder check for .env.example — only skip obvious dummy values,
+	 * not values merely containing the word "example" (e.g. api.example.com).
+	 */
+	public static boolean isTemplatePlaceholder(String value) {
+		if (value == null || value.isBlank()) {
+			return true;
+		}
+		String normalized = value.trim().toLowerCase();
+		if (normalized.length() < 3) {
+			return true;
+		}
+		return isObviousPlaceholder(normalized)
+				|| normalized.equals("your_api_key")
+				|| normalized.equals("your_secret")
+				|| normalized.startsWith("your_")
 				|| normalized.startsWith("<")
-				|| normalized.contains("${")
-				|| normalized.equals("xxx")
+				|| normalized.contains("${");
+	}
+
+	private static boolean isObviousPlaceholder(String normalized) {
+		return normalized.equals("xxx")
 				|| normalized.equals("todo")
 				|| normalized.equals("null")
 				|| normalized.equals("none")
 				|| normalized.equals("undefined")
-				|| normalized.equals("test")
+				|| normalized.equals("changeme")
 				|| normalized.matches("^[*x\\-_.]+$");
 	}
 }
