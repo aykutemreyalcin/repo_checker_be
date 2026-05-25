@@ -48,6 +48,9 @@ public class SuspiciousScriptScanner {
 			List<String> lines = Files.readAllLines(file);
 			for (int i = 0; i < lines.size(); i++) {
 				String line = lines.get(i);
+				if (line.trim().startsWith("#")) {
+					continue;
+				}
 				for (SuspiciousPattern pattern : PATTERNS) {
 					if (pattern.pattern().matcher(line).find()) {
 						findings.add(new Finding(
@@ -57,6 +60,7 @@ public class SuspiciousScriptScanner {
 								i + 1,
 								pattern.description(),
 								line.length() > 120 ? line.substring(0, 120) + "..." : line));
+						break;
 					}
 				}
 			}
@@ -65,13 +69,16 @@ public class SuspiciousScriptScanner {
 	}
 
 	private boolean isScriptFile(String relativePath) {
-		String lower = relativePath.toLowerCase();
-		return lower.endsWith(".sh")
-				|| lower.endsWith(".bash")
-				|| lower.endsWith(".ps1")
-				|| lower.endsWith(".js")
-				|| lower.endsWith(".ts")
-				|| lower.contains("scripts/");
+		String lower = relativePath.toLowerCase().replace('\\', '/');
+		String fileName = lower.contains("/")
+				? lower.substring(lower.lastIndexOf('/') + 1)
+				: lower;
+		return fileName.endsWith(".sh")
+				|| fileName.endsWith(".bash")
+				|| fileName.endsWith(".ps1")
+				|| (fileName.endsWith(".js") && !fileName.endsWith(".min.js"))
+				|| (fileName.endsWith(".ts") && !fileName.endsWith(".d.ts"))
+				|| lower.contains("/scripts/");
 	}
 
 	private record SuspiciousPattern(Pattern pattern, String description) {

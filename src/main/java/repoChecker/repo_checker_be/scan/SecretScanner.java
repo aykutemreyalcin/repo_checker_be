@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 import repoChecker.repo_checker_be.model.Finding;
 import repoChecker.repo_checker_be.model.FindingCategory;
 import repoChecker.repo_checker_be.model.FindingSeverity;
+import repoChecker.repo_checker_be.util.EnvFileRules;
 import repoChecker.repo_checker_be.util.SnippetMasker;
 
 @Component
@@ -54,6 +55,10 @@ public class SecretScanner {
 	public List<Finding> scan(Path repoRoot) throws IOException {
 		List<Finding> findings = new ArrayList<>();
 		for (Path file : FileWalker.listTextFiles(repoRoot, maxFileSizeBytes)) {
+			if (EnvFileRules.isEnvFile(file)) {
+				continue;
+			}
+
 			List<String> lines = Files.readAllLines(file);
 			for (int i = 0; i < lines.size(); i++) {
 				String line = lines.get(i);
@@ -61,6 +66,9 @@ public class SecretScanner {
 					Matcher matcher = secretPattern.pattern().matcher(line);
 					if (matcher.find()) {
 						String matched = matcher.groupCount() >= 2 ? matcher.group(2) : matcher.group();
+						if (EnvFileRules.isPlaceholder(matched)) {
+							continue;
+						}
 						findings.add(new Finding(
 								secretPattern.severity(),
 								FindingCategory.SECRET,
@@ -68,6 +76,7 @@ public class SecretScanner {
 								i + 1,
 								secretPattern.description(),
 								SnippetMasker.mask(matched)));
+						break;
 					}
 				}
 			}

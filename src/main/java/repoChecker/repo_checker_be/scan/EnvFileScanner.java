@@ -14,13 +14,12 @@ import org.springframework.stereotype.Component;
 import repoChecker.repo_checker_be.model.Finding;
 import repoChecker.repo_checker_be.model.FindingCategory;
 import repoChecker.repo_checker_be.model.FindingSeverity;
+import repoChecker.repo_checker_be.util.EnvFileRules;
 import repoChecker.repo_checker_be.util.SnippetMasker;
 
 @Component
 public class EnvFileScanner {
 
-	private static final Pattern ENV_FILE_NAME = Pattern.compile(
-			"(?i)^\\.env(\\.[^/\\\\]+)?$|.*\\.env$|(^|/)\\.env\\.[^/\\\\]+$");
 	private static final Pattern SUSPICIOUS_VALUE = Pattern.compile(
 			"(?i)^(api[_-]?key|secret|password|token|private[_-]?key)\\s*=\\s*(.+)$");
 	private static final Pattern SUSPICIOUS_VALUE_CONTENT = Pattern.compile(
@@ -37,8 +36,9 @@ public class EnvFileScanner {
 
 		try (Stream<Path> paths = Files.walk(repoRoot)) {
 			paths.filter(Files::isRegularFile)
-					.filter(path -> !path.toString().contains("/.git/"))
+					.filter(path -> !FileWalker.isUnderSkippedDirectory(path))
 					.filter(this::withinSizeLimit)
+					.filter(EnvFileRules::isEnvFile)
 					.forEach(path -> scanEnvFile(repoRoot, path, findings));
 		}
 
@@ -46,22 +46,18 @@ public class EnvFileScanner {
 	}
 
 	private void scanEnvFile(Path repoRoot, Path file, List<Finding> findings) {
-		String fileName = file.getFileName().toString();
 		String relativePath = repoRoot.relativize(file).toString();
-		boolean envFileName = ENV_FILE_NAME.matcher(fileName).matches()
-				|| ENV_FILE_NAME.matcher(relativePath).find();
+		boolean template = EnvFileRules.isEnvTemplate(file);
 
-		if (!envFileName) {
-			return;
+		if (!template) {
+			findings.add(new Finding(
+					FindingSeverity.HIGH,
+					FindingCategory.ENV_FILE,
+					relativePath,
+					null,
+					"Environment file committed to repository",
+					null));
 		}
-
-		findings.add(new Finding(
-				FindingSeverity.HIGH,
-				FindingCategory.ENV_FILE,
-				relativePath,
-				null,
-				"Environment file committed to repository",
-				null));
 
 		try {
 			List<String> lines = Files.readAllLines(file);
@@ -71,26 +67,35 @@ public class EnvFileScanner {
 					continue;
 				}
 
+				FindingSeverity lineSeverity = template
+						? FindingSeverity.MEDIUM
+						: FindingSeverity.CRITICAL;
+
 				var matcher = SUSPICIOUS_VALUE.matcher(line);
 				if (matcher.matches()) {
 					String value = matcher.group(2).trim();
-					if (!value.isEmpty() && !isPlaceholder(value)) {
+					if (!value.isEmpty() && !EnvFileRules.isPlaceholder(value)) {
 						findings.add(new Finding(
-								FindingSeverity.CRITICAL,
+								lineSeverity,
 								FindingCategory.ENV_FILE,
 								relativePath,
 								i + 1,
-								"Sensitive value in environment file",
+								template
+										? "Non-placeholder value in environment template file"
+										: "Sensitive value in environment file",
 								SnippetMasker.mask(value)));
 					}
 				}
-				else if (SUSPICIOUS_VALUE_CONTENT.matcher(line).find()) {
+				else if (SUSPICIOUS_VALUE_CONTENT.matcher(line).find()
+						&& !EnvFileRules.isPlaceholder(line)) {
 					findings.add(new Finding(
-							FindingSeverity.CRITICAL,
+							lineSeverity,
 							FindingCategory.ENV_FILE,
 							relativePath,
 							i + 1,
-							"Possible secret pattern in environment file",
+							template
+									? "Possible secret pattern in environment template file"
+									: "Possible secret pattern in environment file",
 							SnippetMasker.mask(line)));
 				}
 			}
@@ -113,13 +118,5 @@ public class EnvFileScanner {
 		catch (IOException ex) {
 			return false;
 		}
-	}
-
-	private boolean isPlaceholder(String value) {
-		String normalized = value.toLowerCase();
-		return normalized.contains("changeme")
-				|| normalized.contains("your_")
-				|| normalized.equals("xxx")
-				|| normalized.equals("todo");
 	}
 }
