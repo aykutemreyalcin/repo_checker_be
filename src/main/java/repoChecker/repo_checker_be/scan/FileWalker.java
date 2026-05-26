@@ -8,10 +8,34 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 public final class FileWalker {
 
+	private static final Set<String> SKIPPED_DIR_NAMES = Set.of(
+			".git",
+			"node_modules",
+			"vendor",
+			"dist",
+			"build",
+			"target",
+			".gradle",
+			"__pycache__",
+			".next",
+			"coverage",
+			".idea");
+
 	private FileWalker() {
+	}
+
+	public static boolean isUnderSkippedDirectory(Path file) {
+		for (Path part : file) {
+			if (part.getFileName() != null
+					&& SKIPPED_DIR_NAMES.contains(part.getFileName().toString())) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	public static List<Path> listTextFiles(Path repoRoot, long maxFileSizeBytes) throws IOException {
@@ -19,7 +43,8 @@ public final class FileWalker {
 		Files.walkFileTree(repoRoot, new SimpleFileVisitor<>() {
 			@Override
 			public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-				if (dir.getFileName() != null && ".git".equals(dir.getFileName().toString())) {
+				if (dir.getFileName() != null
+						&& SKIPPED_DIR_NAMES.contains(dir.getFileName().toString())) {
 					return FileVisitResult.SKIP_SUBTREE;
 				}
 				return FileVisitResult.CONTINUE;
@@ -27,7 +52,9 @@ public final class FileWalker {
 
 			@Override
 			public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-				if (attrs.isRegularFile() && attrs.size() <= maxFileSizeBytes && !isBinary(file)) {
+				if (attrs.isRegularFile()
+						&& attrs.size() <= maxFileSizeBytes
+						&& !isBinary(file)) {
 					files.add(file);
 				}
 				return FileVisitResult.CONTINUE;
