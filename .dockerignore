@@ -1,0 +1,10 @@
+target/
+.idea/
+.git/
+.gitignore
+.gitattributes
+*.iml
+HELP.md
+README.md
+.DS_Store
+.vscode/
